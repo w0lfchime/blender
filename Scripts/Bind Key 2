@@ -1,0 +1,28 @@
+import bpy
+
+OP = "view3d.cycle_pivot"
+
+def remove_binding(kc, *, type="Q", alt=False, ctrl=False, shift=False):
+    for km in kc.keymaps:
+        for kmi in list(km.keymap_items):
+            if (kmi.idname == OP and kmi.type == type and
+                kmi.alt == alt and kmi.ctrl == ctrl and kmi.shift == shift):
+                km.keymap_items.remove(kmi)
+
+def add_binding(kc):
+    km = kc.keymaps.get("3D View")
+    if km is None:
+        km = kc.keymaps.new(name="3D View", space_type="VIEW_3D")
+
+    kmi = km.keymap_items.new(OP, type="Q", value="PRESS", ctrl=True, alt=True, shift=True)
+    return kmi
+
+kc_user = bpy.context.window_manager.keyconfigs.user
+
+# Remove the problematic one(s)
+remove_binding(kc_user, type="Q", alt=True, ctrl=False, shift=False)  # Alt+Q
+
+# Add the "surely unused" one
+add_binding(kc_user)
+
+print("Updated USER keymap: removed Alt+Q, added Ctrl+Alt+Shift+Q for", OP)

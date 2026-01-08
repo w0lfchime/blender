@@ -1,0 +1,37 @@
+import bpy
+
+class CyclePivot(bpy.types.Operator):
+    bl_idname = "view3d.cycle_pivot"
+    bl_label = "Cycle Transform Pivot"
+
+    def execute(self, context):
+        pivots = [
+            'MEDIAN_POINT',
+            'CURSOR',
+            'INDIVIDUAL_ORIGINS',
+            'ACTIVE_ELEMENT',
+            'BOUNDING_BOX_CENTER'
+        ]
+        current = context.scene.tool_settings.transform_pivot_point
+        next_pivot = pivots[(pivots.index(current) + 1) % len(pivots)]
+        context.scene.tool_settings.transform_pivot_point = next_pivot
+        return {'FINISHED'}
+
+addon_keymaps = []
+
+def register():
+    bpy.utils.register_class(CyclePivot)
+    wm = bpy.context.window_manager
+    km = wm.keyconfigs.addon.keymaps.new(name="3D View", space_type="VIEW_3D")
+    kmi = km.keymap_items.new("view3d.cycle_pivot", type="Q", value="PRESS", alt=True)
+
+    addon_keymaps.append((km, kmi))
+
+def unregister():
+    for km, kmi in addon_keymaps:
+        km.keymap_items.remove(kmi)
+    addon_keymaps.clear()
+    bpy.utils.unregister_class(CyclePivot)
+
+if __name__ == "__main__":
+    register()
