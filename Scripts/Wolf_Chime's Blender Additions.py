@@ -11,109 +11,129 @@ bl_info = {
 import bpy
 
 
-class VIEW3D_OT_cycle_pivot(bpy.types.Operator):
-    bl_idname = "view3d.cycle_pivot"
-    bl_label = "Cycle Transform Pivot"
-    bl_options = {'REGISTER'}
+# =============================================================================
+# Keybinds (single source of truth)
+# All binds are Ctrl+Alt+Shift + <KEY> by design.
+# =============================================================================
 
-    def execute(self, context):
-        pivots = (
-            'MEDIAN_POINT',
-            'CURSOR',
-            'INDIVIDUAL_ORIGINS',
-            'ACTIVE_ELEMENT',
-            'BOUNDING_BOX_CENTER',
+MODS = dict(ctrl=True, alt=True, shift=True)
+
+# Each entry:
+#   label: human-friendly note
+#   keymap_name: Blender keymap name (e.g., "3D View", "Mesh")
+#   space_type: keymap space (e.g., "VIEW_3D", "EMPTY")
+#   idname: operator bl_idname
+#   type: Blender key identifier ("Q", "W", "ONE", etc.)
+#   value: usually "PRESS"
+KEYBINDS = [
+    dict(
+        label="Cycle Pivot",
+        keymap_name="3D View",
+        space_type="VIEW_3D",
+        idname="view3d.cycle_pivot",
+        type="Q",
+        value="PRESS",
+        **MODS,
+    ),
+    dict(
+        label="Cycle Transform Orientation",
+        keymap_name="3D View",
+        space_type="VIEW_3D",
+        idname="view3d.cycle_transform_orientation",
+        type="W",
+        value="PRESS",
+        **MODS,
+    ),
+    dict(
+        label="Smooth Vertices (Edit Mode)",
+        keymap_name="Mesh",
+        space_type="EMPTY",
+        idname="view3d.smooth_vertices",
+        type="ONE",
+        value="PRESS",
+        **MODS,
+    ),
+]
+
+
+# -------------------------
+# Helpers
+# -------------------------
+
+def _cycle_value(current, options):
+    """Return the next value in options after current (wraps around)."""
+    try:
+        idx = options.index(current)
+    except ValueError:
+        idx = -1
+    return options[(idx + 1) % len(options)]
+
+
+addon_keymaps = []  # list[(km, kmi)]
+
+
+def _remove_addon_kmis_by_idname(km, idnames):
+    """Remove any existing addon keymap items in km that match our operator idnames."""
+    for kmi in list(km.keymap_items):
+        if kmi.idname in idnames:
+            km.keymap_items.remove(kmi)
+
+
+def _warn_on_collisions(binds):
+    seen = set()
+    for b in binds:
+        sig = (
+            b["keymap_name"],
+            b.get("space_type", ""),
+            b["type"],
+            b.get("value", "PRESS"),
+            bool(b.get("ctrl")),
+            bool(b.get("alt")),
+            bool(b.get("shift")),
+            bool(b.get("oskey")),
         )
-
-        ts = context.scene.tool_settings
-        cur = ts.transform_pivot_point
-
-        try:
-            i = pivots.index(cur)
-        except ValueError:
-            i = 0
-
-        ts.transform_pivot_point = pivots[(i + 1) % len(pivots)]
-        return {'FINISHED'}
+        if sig in seen:
+            print(f"[Wolf_Chime] WARNING: duplicate binding signature: {sig} ({b.get('label','')})")
+        else:
+            seen.add(sig)
 
 
-class VIEW3D_OT_cycle_orientation(bpy.types.Operator):
-    bl_idname = "view3d.cycle_transform_orientation"
-    bl_label = "Cycle Transform Orientation"
-    bl_options = {'REGISTER'}
-
-    def execute(self, context):
-        # Common built-in orientations. (You can add/remove if you want.)
-        orientations = (
-            'GLOBAL',
-            'LOCAL',
-            #'NORMAL',
-            #'GIMBAL',
-            'VIEW',
-            'CURSOR',
-            #'PARENT',
-        )
-
-        scene = context.scene
-
-        # Primary (active) orientation slot is index 0.
-        # This matches the UI's orientation dropdown.
-        slot = scene.transform_orientation_slots[0]
-        cur = slot.type
-
-        try:
-            i = orientations.index(cur)
-        except ValueError:
-            i = 0
-
-        slot.type = orientations[(i + 1) % len(orientations)]
-        return {'FINISHED'}
-
-
-addon_keymaps = []
-
-
-def register_keymap():
+def register_keymaps():
     wm = bpy.context.window_manager
     kc = wm.keyconfigs.addon
     if not kc:
         return
 
-    km = kc.keymaps.new(name="3D View", space_type="VIEW_3D")
+    _warn_on_collisions(KEYBINDS)
 
-    # Remove old addon-created bindings for these operators (prevents duplicates)
-    op_ids = {
-        VIEW3D_OT_cycle_pivot.bl_idname,
-        VIEW3D_OT_cycle_orientation.bl_idname,
-    }
-    for kmi in list(km.keymap_items):
-        if kmi.idname in op_ids:
-            km.keymap_items.remove(kmi)
+    # Group binds by keymap so we only create each keymap once.
+    by_km = {}
+    for b in KEYBINDS:
+        key = (b["keymap_name"], b.get("space_type", "EMPTY"))
+        by_km.setdefault(key, []).append(b)
 
-    # Ctrl+Alt+Shift+Q -> cycle pivot
-    kmi_pivot = km.keymap_items.new(
-        VIEW3D_OT_cycle_pivot.bl_idname,
-        type="Q",
-        value="PRESS",
-        ctrl=True,
-        alt=True,
-        shift=True
-    )
-    addon_keymaps.append((km, kmi_pivot))
+    for (km_name, space_type), binds in by_km.items():
+        km = kc.keymaps.new(name=km_name, space_type=space_type)
 
-    # Ctrl+Alt+Shift+W -> cycle transform orientation
-    kmi_orient = km.keymap_items.new(
-        VIEW3D_OT_cycle_orientation.bl_idname,
-        type="W",
-        value="PRESS",
-        ctrl=True,
-        alt=True,
-        shift=True
-    )
-    addon_keymaps.append((km, kmi_orient))
+        # Remove old KMIs for OUR operators in this keymap, so reloading the addon doesn't duplicate.
+        idnames = {b["idname"] for b in binds}
+        _remove_addon_kmis_by_idname(km, idnames)
+
+        # Add KMIs from the table.
+        for b in binds:
+            kmi = km.keymap_items.new(
+                b["idname"],
+                type=b["type"],
+                value=b.get("value", "PRESS"),
+                ctrl=b.get("ctrl", False),
+                alt=b.get("alt", False),
+                shift=b.get("shift", False),
+                oskey=b.get("oskey", False),
+            )
+            addon_keymaps.append((km, kmi))
 
 
-def unregister_keymap():
+def unregister_keymaps():
     for km, kmi in addon_keymaps:
         try:
             km.keymap_items.remove(kmi)
@@ -122,6 +142,27 @@ def unregister_keymap():
     addon_keymaps.clear()
 
 
+# -------------------------
+# Operators
+# -------------------------
+
+class VIEW3D_OT_cycle_pivot(bpy.types.Operator):
+    bl_idname = "view3d.cycle_pivot"
+    bl_label = "Cycle Transform Pivot"
+    bl_options = {'REGISTER'}
+
+    pivots = (
+        'MEDIAN_POINT',
+        'CURSOR',
+        'INDIVIDUAL_ORIGINS',
+        'ACTIVE_ELEMENT',
+        'BOUNDING_BOX_CENTER',
+    )
+
+    def execute(self, context):
+        ts = context.scene.tool_settings
+        ts.transform_pivot_point = _cycle_value(ts.transform_pivot_point, self.pivots)
+        return {'FINISHED'}
 
 
 class VIEW3D_OT_smooth_vertices(bpy.types.Operator):
@@ -134,46 +175,46 @@ class VIEW3D_OT_smooth_vertices(bpy.types.Operator):
             self.report({'WARNING'}, "Must be in Edit Mode")
             return {'CANCELLED'}
 
-        bpy.ops.mesh.vertices_smooth(factor=0.5, repeat=1)
+        bpy.ops.mesh.vertices_smooth()
         return {'FINISHED'}
 
 
+class VIEW3D_OT_cycle_orientation(bpy.types.Operator):
+    bl_idname = "view3d.cycle_transform_orientation"
+    bl_label = "Cycle Transform Orientation"
+    bl_options = {'REGISTER'}
 
-
-
-def register_keymap():
-    wm = bpy.context.window_manager
-    kc = wm.keyconfigs.addon
-    if not kc:
-        return
-
-    km = kc.keymaps.new(name="3D View", space_type="VIEW_3D")
-
-    # Remove old bindings for smooth to prevent dupes
-    for kmi in list(km.keymap_items):
-        if kmi.idname == VIEW3D_OT_smooth_vertices.bl_idname:
-            km.keymap_items.remove(kmi)
-
-    # Bind Ctrl+Shift+1
-    kmi = km.keymap_items.new(
-        VIEW3D_OT_smooth_vertices.bl_idname,
-        type='ONE',
-        value='PRESS',
-        ctrl=True,
-        shift=True
+    orientations = (
+        'GLOBAL',
+        'LOCAL',
+        'VIEW',
+        'CURSOR',
     )
 
-    addon_keymaps.append((km, kmi))
+    def execute(self, context):
+        slot = context.scene.transform_orientation_slots[0]
+        slot.type = _cycle_value(slot.type, self.orientations)
+        return {'FINISHED'}
+
+
+# -------------------------
+# Registration
+# -------------------------
+
+_CLASSES = (
+    VIEW3D_OT_cycle_pivot,
+    VIEW3D_OT_cycle_orientation,
+    VIEW3D_OT_smooth_vertices,
+)
+
 
 def register():
-    bpy.utils.register_class(VIEW3D_OT_cycle_pivot)
-    bpy.utils.register_class(VIEW3D_OT_cycle_orientation)
-    bpy.utils.register_class(VIEW3D_OT_smooth_vertices) 
-    register_keymap()
+    for cls in _CLASSES:
+        bpy.utils.register_class(cls)
+    register_keymaps()
 
 
 def unregister():
-    unregister_keymap()
-    bpy.utils.unregister_class(VIEW3D_OT_cycle_orientation)
-    bpy.utils.unregister_class(VIEW3D_OT_cycle_pivot)
-    bpy.utils.unregister_class(VIEW3D_OT_smooth_vertices) 
+    unregister_keymaps()
+    for cls in reversed(_CLASSES):
+        bpy.utils.unregister_class(cls)
