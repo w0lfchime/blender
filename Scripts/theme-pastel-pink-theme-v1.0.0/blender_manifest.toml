@@ -1,0 +1,16 @@
+schema_version = "1.0.0"
+
+id = "Pastel_Pink_theme"
+version = "1.0.0"
+name = "Pastel_Pink"
+tagline = "Bright and poppy pastel pink Blender theme"
+maintainer = "kame404"
+type = "theme"
+
+website = "https://github.com/kame404/Blender-Themes"
+tags = ["Light"]
+
+blender_version_min = "5.0.0"
+blender_version_max = "5.1.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
